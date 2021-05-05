@@ -586,7 +586,7 @@ class Prophet(object):
         return holiday_features, prior_scale_list, holiday_names
 
     def add_regressor(self, name, prior_scale=None, standardize='auto',
-                      mode=None):
+                      nonnegative=False, mode=None):
         """Add an additional regressor to be used for fitting and predicting.
 
         The dataframe passed to `fit` and `predict` will have a column with the
@@ -610,7 +610,9 @@ class Prophet(object):
             binary), True, or False.
         mode: optional, 'additive' or 'multiplicative'. Defaults to
             self.seasonality_mode.
-
+  		nonnegative: optional, specify whether the learned coefficient
+            for the regressor should be forced to be nonnegative.
+            Can be True or False. Defaults to False.
         Returns
         -------
         The prophet object.
@@ -632,6 +634,7 @@ class Prophet(object):
             'standardize': standardize,
             'mu': 0.,
             'std': 1.,
+			'nonnegative': nonnegative,
             'mode': mode,
         }
         return self
@@ -1119,6 +1122,12 @@ class Prophet(object):
         seasonal_features, prior_scales, component_cols, modes = (
             self.make_all_seasonality_features(history))
         self.train_component_cols = component_cols
+        constrained_indices = []
+        for c in self.extra_regressors:
+            if self.extra_regressors[c]['nonnegative']:
+                col_idx = (self.train_component_cols[c] == 1).idxmax()
+                constrained_indices.append(col_idx)
+        unconstrained_indices = [i for i in self.train_component_cols.index if i not in constrained_indices]
         self.component_modes = modes
         self.fit_kwargs = deepcopy(kwargs)
 
@@ -1139,8 +1148,12 @@ class Prophet(object):
             'trend_indicator': trend_indicator[self.growth],
             's_a': component_cols['additive_terms'],
             's_m': component_cols['multiplicative_terms'],
+            'num_constrained': len(constrained_indices),
+            'num_unconstrained': len(unconstrained_indices),
+            'constrained_beta_idx': np.array(constrained_indices, dtype=int) + 1,
+            'unconstrained_beta_idx': np.array(unconstrained_indices, dtype=int) + 1
         }
-
+        
         if self.growth == 'linear':
             dat['cap'] = np.zeros(self.history.shape[0])
             kinit = self.linear_growth_init(history)
